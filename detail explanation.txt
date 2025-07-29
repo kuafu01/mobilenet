@@ -1,0 +1,69 @@
+1.
+这段代码的主要作用是确定在使用 `torch.utils.data.DataLoader` 加载数据时，每个进程所使用的数据加载器工作线程的数量。下面是对代码的详细解释：
+
+### 代码逐行解释
+
+#### 1. `nw = min([os.cpu_count(), batch_size if batch_size > 1 else 0, 8])`
+这行代码使用 `min` 函数从一个列表中选取最小值，并将其赋值给变量 `nw`，该变量代表数据加载器的工作线程数量。列表中的元素分别为：
+- `os.cpu_count()`：调用 `os` 模块的 `cpu_count` 函数，返回当前系统的 CPU 核心数量。这是一个上限，因为数据加载通常不会使用超过系统 CPU 核心数量的线程，以避免资源过度占用。
+- `batch_size if batch_size > 1 else 0`：使用三元运算符来判断 `batch_size` 的值。如果 `batch_size` 大于 1，则使用 `batch_size` 作为候选值；否则，将候选值设为 0。这是为了避免在 `batch_size` 为 1 或更小的情况下，创建不必要的工作线程。
+- `8`：一个固定的上限值，即最多使用 8 个工作线程。这是为了防止在 CPU 核心数较多的系统上，创建过多的工作线程导致资源浪费或性能下降。
+
+#### 2. `print('Using {} dataloader workers every process'.format(nw))`
+这行代码使用 `print` 函数输出一条信息，显示每个进程将使用的数据加载器工作线程数量。`{}` 是格式化字符串中的占位符，`format(nw)` 会将 `nw` 的值插入到占位符的位置。
+
+### 代码示例解释
+假设系统有 16 个 CPU 核心，`batch_size` 设置为 12。则代码执行过程如下：
+- `os.cpu_count()` 返回 16。
+- `batch_size if batch_size > 1 else 0` 返回 12。
+- 固定上限值为 8。
+
+由于 `min([16, 12, 8])` 的结果是 8，所以 `nw` 的值为 8。最终输出信息为 `Using 8 dataloader workers every process`。
+
+### 代码作用总结
+这段代码的作用是根据系统的 CPU 核心数量、`batch_size` 的值以及一个固定的上限值，动态地确定每个进程使用的数据加载器工作线程数量，以优化数据加载的性能，避免资源浪费。
+2.
+这段代码的主要目的是加载预训练模型的权重，但会排除分类器层的权重，以适应新的任务或数据集。下面是对代码的详细解释：
+
+### 代码整体功能概述
+在深度学习中，预训练模型是一种常用的技术，它可以利用在大规模数据集上训练得到的权重，帮助模型在新的数据集上更快地收敛，并且通常能取得更好的性能。然而，当我们使用预训练模型进行新的任务时，分类器层的权重往往需要重新训练，因为不同的任务可能有不同的类别数量。因此，我们需要删除预训练模型中分类器层的权重，只加载特征提取层的权重。
+
+### 代码逐行解释
+
+#### `pre_dict = {k: v for k, v in pre_weights.items() if net.state_dict()[k].numel() == v.numel()}`
+这行代码使用了字典推导式，创建了一个新的字典 `pre_dict`，其中只包含那些权重数量（即元素个数）与当前模型 `net` 对应层权重数量相同的键值对。具体解释如下：
+- `pre_weights.items()`：`pre_weights` 是预训练模型的权重字典，`items()` 方法返回一个包含字典中所有键值对的迭代器。
+- `k` 和 `v`：分别表示键（即层的名称）和值（即层的权重）。
+- `net.state_dict()`：返回当前模型 `net` 的状态字典，其中包含了模型所有层的权重。
+- `net.state_dict()[k].numel()`：`numel()` 方法返回张量的元素个数，因此 `net.state_dict()[k].numel()` 表示当前模型中名称为 `k` 的层的权重元素个数。
+- `v.numel()`：表示预训练模型中名称为 `k` 的层的权重元素个数。
+- `if net.state_dict()[k].numel() == v.numel()`：这是一个过滤条件，只有当当前模型和预训练模型中对应层的权重元素个数相同时，才将该键值对添加到 `pre_dict` 中。
+
+#### `missing_keys, unexpected_keys = net.load_state_dict(pre_dict, strict=False)`
+这行代码将 `pre_dict` 中的权重加载到当前模型 `net` 中。具体解释如下：
+- `net.load_state_dict(pre_dict, strict=False)`：`load_state_dict()` 是 PyTorch 中用于加载模型权重的方法，它接受一个状态字典作为输入，并将其中的权重加载到模型中。`strict` 参数是一个布尔值，用于指定是否严格匹配状态字典中的键和模型中的键。当 `strict=False` 时，允许状态字典中的键与模型中的键不完全匹配，即可以忽略一些键或包含一些额外的键。
+- `missing_keys`：是一个列表，包含了模型中存在但状态字典中不存在的键。
+- `unexpected_keys`：是一个列表，包含了状态字典中存在但模型中不存在的键。
+
+### 代码示例解释
+假设我们有一个预训练的 MobileNetV2 模型，其分类器层是针对 1000 个类别的，而我们的新任务只有 5 个类别。那么，分类器层的权重就不能直接使用，需要删除。通过上述代码，我们可以只加载特征提取层的权重，而忽略分类器层的权重。
+
+```python
+import torch
+from torchvision.models import mobilenet_v2
+
+# 创建一个 MobileNetV2 模型，用于 5 个类别的分类任务
+net = mobilenet_v2(num_classes=5)
+
+# 加载预训练的 MobileNetV2 模型权重
+pre_weights = torch.load('mobilenet_v2.pth')
+
+# 删除分类器权重
+pre_dict = {k: v for k, v in pre_weights.items() if net.state_dict()[k].numel() == v.numel()}
+missing_keys, unexpected_keys = net.load_state_dict(pre_dict, strict=False)
+
+print("Missing keys:", missing_keys)
+print("Unexpected keys:", unexpected_keys)
+```
+
+在这个示例中，`pre_dict` 只包含了特征提取层的权重，分类器层的权重被过滤掉了。`missing_keys` 可能包含分类器层的键，因为预训练模型的分类器层权重没有被加载；`unexpected_keys` 应该为空，因为我们只保留了与当前模型权重数量相同的键值对。
